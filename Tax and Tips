@@ -1,0 +1,37 @@
+# Calculate Tax ad tips meal ordered at a restaurant
+# GST 5%, SST 5% and Tips 3%
+# percentage of a number: Number = P/100 * Number
+#   P - percentage of a number, Number - Actual number to find %
+
+print("Please select your order items(0 or More):")
+st = int(input("No.of Starter Items: "))
+ve = int(input("No.of Veg items: "))
+nv = int(input("No.of NonVeg Items: "))
+de = int(input("No.of Desert Items: "))
+
+stam = st * 120
+veam = ve * 150
+nvam = nv * 200
+deam = de * 80
+
+amount = stam + veam + nvam + deam
+print(amount)
+
+tax = (5/100) * amount
+tips = (3/100) * amount
+ta = amount + (tax*2) + tips
+
+print("HI, Please find your Bill details:")
+print('************************')
+print("Ordered items| Amount")
+print("Starter : {}  -  {}".format(st, stam))
+print("Veg     : {}  -  {}".format(ve, veam))
+print("NonVeg  : {}  -  {}".format(nv, nvam))
+print("Desert  : {}  -  {}".format(de, deam))
+print("Total        -  {}".format(amount))
+print("GST (5%)     -  {}".format(tax))
+print("SST (5%)     -  {}".format(tax))
+print("Tips (3%)    -  {}".format(tips))
+print("************************")
+print("Total Amount -  {}".format(ta))
+print("________________________")

@@ -1,0 +1,18 @@
+# Compound Interest:
+# calculate the interest amount for the saving account.
+# Interest rate: 4 % we can calculate and show it year by year.
+# A = P(1 + r/n)^nt
+
+p = int(input("Please enter the invested amount: "))
+
+
+def compint(ny):
+    ri = 4/100  #ri = 0.04
+    a = p * (1 + ri / 12) ** (12 * ny)
+    ta = round(a, 2)
+    return ta
+
+
+for x in range(1, 6):
+    re = compint(x)
+    print("Total Amount after {} year is {}".format(x, re))

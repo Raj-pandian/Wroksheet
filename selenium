@@ -1,0 +1,506 @@
+'''
+
+This code is used to send an auto cycle summary email.
+Used Python, Selenium and pandas to create this tool.
+
+Pre-request: Placed the chrome driver into given path
+             Re-login to service now and add the required INC columns
+
+Divided this process in 2 parts.
+Part1 - Automatically logged into Servicenow site and download the today's and yesterday's INC list with required details.
+        a. Initially our tool will fetch the user email address and download path from your machine.
+        b. Before that we are checking whether the incident.xlsx file already available or not, if it is available then
+           we have to rename the file.
+Part2 - Fetch and compose the summary email form the downloaded the excel and send it to the recipient address.
+
+
+Initial release date 06/22/2023
+Developed by Raj pandian - TM029
+
+(If any doubts are suggestions please contact rajapandian.petchimuthu@ofc.com)
+
+Version 2 updated on 10/07/2023
+Changed the mail format to table.
+
+Version 3 updated on 10/31/2023
+Monday mail format change.
+
+'''
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.edge import service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import Select
+from selenium.webdriver.edge.options import Options as EdgeOptions
+import time
+import pyautogui as py
+import pandas as pd
+import schedule
+import re
+import os
+from datetime import datetime
+from datetime import timedelta
+import win32com.client as win32
+from pathlib import Path
+import numpy
+
+# Using outlook application to send an email
+outlook = win32.Dispatch('outlook.application')
+mail = outlook.CreateItem(0)
+
+curr_emailid = outlook.Session.Accounts.Item(1).DisplayName
+curr_emailid = str(curr_emailid).lower()
+name, sname, *rest = str(curr_emailid).split('.')
+# print(curr_emailid)
+# print(name, sname)
+print("Hello {}".format(str(name).capitalize()))
+
+DOWNLOADS = Path.home() / 'Downloads'
+head, tail = os.path.split(DOWNLOADS)
+# print(DOWNLOADS)
+
+username = curr_emailid
+#email_address = curr_emailid
+email_address = 'rajapandian.petchimuthu@ofc.com'
+# email_address = 'balasubramaniyam.dhandapani@ofc.com'
+#email_address = 'DPPCFOffshoreSupportSummaryMailer@ofc.com'
+
+print("Sender  E-mail  : {}".format(str(curr_emailid)))
+print("Recipient E-mail: {}".format(str(email_address)))
+
+servicenow_link = "https://ofcservicepoint.ofcapps.com/nav_to.do?uri=%2Fincident_list.do%3Fsysparm_query%3Dassignment_group%253D08330ca1db0c64500600633fd3961996%255EORassignment_group%253D238c4021dbcc64500600633fd3961933%255EORassignment_group%253De78c4021dbcc64500600633fd396193b%255EORassignment_group%253D738c4021dbcc64500600633fd3961982%255Eopened_atONToday@javascript:gs.beginningOfToday()@javascript:gs.endOfToday()%255EORopened_atONYesterday@javascript:gs.beginningOfYesterday()@javascript:gs.endOfYesterday()%26sysparm_first_row%3D1%26sysparm_view%3Dindicators_panel"
+monday_link = "https://ofcservicepoint.ofcapps.com/nav_to.do?uri=%2Fincident_list.do%3Fsysparm_query%3Dassignment_group%253D08330ca1db0c64500600633fd3961996%255EORassignment_group%253D238c4021dbcc64500600633fd3961933%255EORassignment_group%253De78c4021dbcc64500600633fd396193b%255EORassignment_group%253D738c4021dbcc64500600633fd3961982%255Eopened_atONToday@javascript:gs.beginningOfToday()@javascript:gs.endOfToday()%255EORopened_atONLast%2520week@javascript:gs.beginningOfLastWeek()@javascript:gs.endOfLastWeek()%26sysparm_first_row%3D1%26sysparm_view%3Dindicators_panel"
+# Store the constant values - for auto email
+# inc_excel_path = "C:/Users/f9z2zo2/Downloads/incident.xlsx"
+inc_excel_path = str(DOWNLOADS) + str("\incident.xlsx")
+
+# Getting today and yesterday date
+global today
+global yesterday
+global nextweek_date
+
+today = datetime.today()
+today = datetime.date(today)
+prev_day = today - timedelta(days=2)
+yesterday = today - timedelta(days=1)
+nextweek_date = today + + timedelta(days=7)
+
+
+# Getting INC from 9.30
+
+def dls_time():
+    curr_date = datetime.now()
+    today_date = curr_date.date()
+    yr, mn, dt = str(today_date).split('-')
+    # nextweek_date = today_date + + timedelta(days=7)
+
+    print("Today's Date: ", today_date)
+
+    # march_second_sunday = '2023-03'
+    march_second_sunday = yr + '-03'
+    november_first_sunday = yr + '-11'
+
+    # getting date of first/second Sunday
+    mss_date = numpy.busday_offset(march_second_sunday, 1,
+                                   roll='forward',
+                                   weekmask='Sun')
+
+    nfs_date = numpy.busday_offset(november_first_sunday, 0,
+                                   roll='forward',
+                                   weekmask='Sun')
+
+    if today_date > mss_date and today_date < nfs_date:
+        yt_check = '09:30:00'
+        tt_check = '09:30:00'
+    elif today_date == mss_date and today_date < nfs_date:
+        yt_check = '09:30:00'
+        tt_check = '08:00:00'
+    elif today_date > mss_date and today_date == nfs_date:
+        yt_check = '08:00:00'
+        tt_check = '09:30:00'
+    else:
+        yt_check = '08:00:00'
+        tt_check = '08:00:00'
+
+    return yt_check, tt_check
+
+
+yt_check, tt_check = dls_time()
+# print(yt_check, tt_check)
+# time1 = '09:30:00'
+
+mes_inc = 0
+cli_inc = 0
+def_inc = 0
+inc_count = 0
+
+inc_list = []
+msg_list = []
+
+ocu = []
+
+oncall_update_list = ['on-call update:', 'oncall update:', 'oncallupdate:', 'on-callupdate:', 'on call update:',
+                      'oncall-update:', 'on-call-update:']
+
+end_note = "<br><br> Thanks, <br> DP India Team."
+
+
+# ---------------------------------------------------------------------
+
+def inceident_filename():
+    ct = datetime.now()
+    t1 = ct.time()
+    a, b = str(t1).split('.')
+
+    path_down = str(DOWNLOADS) + str("\\")
+
+    download_file = "\incident.xlsx"
+    today_file_name = "\incident" + str(b) + ".xlsx"
+
+    for file_name in os.listdir(path_down):
+        if file_name.startswith("incident.xlsx"):
+            old_name = path_down + download_file
+            new_name = path_down + today_file_name
+            os.rename(old_name, new_name)
+            print("Renamed {} file into {}.".format(download_file[1:], today_file_name[1:]))
+
+
+def name_fetch(div_text):
+    st, pp, sp = div_text.split("\n")
+    return pp[2:], sp[2:]
+
+
+def auto_download():
+    type_password = py.password(text="Your email id: {}\nPlease enter your FUEL password".format(curr_emailid),
+                                title="Cycle Summary Email", default='', mask='*')
+    # print(type_password)
+    if type_password == '':
+        py.alert("Hi {}, please type the correct password to proceed the cycle summary email!.".format(
+            str(name).capitalize()))
+        auto_download()
+    elif type_password == None:
+        py.alert("Cycle summary email is not send.")
+        quit()
+
+    password = type_password
+
+    inceident_filename()
+
+    global mrgps, mrgss, eveps, evess
+
+    # edge
+    #options = webdriver.EdgeOptions()
+    #options.use_chromium = True
+
+    #s = service.Service(r'\\1dc\common\OMA\OMA\CORE-PROCESSING\CDEV4\Cycle summary\msedgedriver.exe')
+    #driver = webdriver.Edge(service=s, options=options)
+    #error listion
+    options = EdgeOptions()
+    options.add_experimental_option('excludeSwitches', ['enable-logging'])
+    driver = webdriver.Edge(options=options)
+
+    driver.maximize_window()
+
+    # Getting servicenow link to auto sign-in
+    driver.get(servicenow_link)
+
+    driver.implicitly_wait(300)
+    print("s1")
+    # Auto sign-in begin
+    WebDriverWait(driver, 20).until(EC.presence_of_all_elements_located((By.ID, 'next')))
+    driver.find_element(By.LINK_TEXT, "ofc Associates Click Here to Authenticate").click()
+
+    time.sleep(2)
+    print("Suss1")
+
+    WebDriverWait(driver, 20).until(EC.presence_of_all_elements_located((By.ID, 'passwordInput')))
+    driver.find_element(By.NAME, "Password").send_keys(password)
+
+    WebDriverWait(driver, 20).until(EC.presence_of_all_elements_located((By.ID, 'submitButton')))
+    driver.find_element(By.ID, "submitButton").click()
+
+    time.sleep(2)
+
+    WebDriverWait(driver, 20).until(EC.presence_of_all_elements_located((By.ID, 'idSIButton9')))
+    driver.find_element(By.ID, "idSIButton9").click()
+    print("s3")
+
+    #Authendication wait
+    time.sleep(25)
+    # Finding Monday date
+    if datetime.today().isoweekday() == 1:
+        driver.get(monday_link)
+    else:
+        driver.get(servicenow_link)
+
+
+    #driver.get(servicenow_link)
+    time.sleep(10)
+
+    # Time zone selection (US/Central)
+    WebDriverWait(driver, 20).until(EC.presence_of_all_elements_located((By.ID, 'nav-settings-button')))
+    driver.find_element(By.ID, "nav-settings-button").click()
+
+    dropdown = Select(driver.find_element(By.ID, 'timezone_picker_select'))
+    dropdown.select_by_value('US/Central')
+
+    WebDriverWait(driver, 20).until(EC.presence_of_all_elements_located((By.CLASS_NAME, 'btn.close.icon-cross')))
+    driver.find_element(By.CLASS_NAME, "btn.close.icon-cross").click()
+
+    # Downloading the Excel report.
+    WebDriverWait(driver, 20).until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
+    driver.find_element(By.CSS_SELECTOR, "i[class='icon-menu col-menu list_header_context list-column-icon']").click()
+
+    driver.find_element(By.XPATH, "//div[@item_id='d1ad2f010a0a0b3e005c8b7fbd7c4e28']").click()
+
+    driver.find_element(By.XPATH, "//div[@item_id='f13f0041473012003db6d7527c9a71f0']").click()
+
+    time.sleep(13)
+    driver.find_element(By.XPATH, "//button[@id='download_button']").click()
+
+    time.sleep(6)
+
+    driver.get(
+        "https://ofcservicepoint.ofcapps.com/$oc.do?sysparm_include_view=daily,weekly,monthly&sysparm_timeline_enabled=false&sysparm_current_view=daily&sysparm_group_id=238c4021dbcc64500600633fd3961933&sysparm_rotas=590629d41b12389429404089bd4bcbc8,597e25d81b16389429404089bd4bcb5e,5c7add901b1ef49429404089bd4bcb1b,9c5a24981b16b49429404089bd4bcb90&sysparm_stack=no&sysparm_group_change_not_allowed=true&sysparm_show_gaps=true&sysparm_show_conflicts=true&sysparm_timezone=US%2FEastern&sysparm_start_date={}&sysparm_rosters=".format(
+            today))
+
+    def oncall_info():
+        time.sleep(6)
+        div_elements = driver.find_elements(By.CLASS_NAME, "eventDescription")
+
+        for div_element in div_elements:
+            # Get text of div element
+            div_text = div_element.text
+            if "00:00 - 04:30 India - Shift 1" in div_text:
+                fn, ln = name_fetch(div_text)
+                mrgsup = (fn + "<br><i>" + ln + "</i>")
+            elif "04:30 - 10:30 India - Shift 2" in div_text:
+                fn, ln = name_fetch(div_text)
+                evgsup = (fn + "<br><i>" + ln + "</i>")
+
+        return mrgsup, evgsup
+
+    mrgps, mrgss = oncall_info()
+    driver.get(
+        "https://ofcservicepoint.ofcapps.com/$oc.do?sysparm_include_view=daily,weekly,monthly&sysparm_timeline_enabled=false&sysparm_current_view=daily&sysparm_group_id=238c4021dbcc64500600633fd3961933&sysparm_rotas=590629d41b12389429404089bd4bcbc8,597e25d81b16389429404089bd4bcb5e,5c7add901b1ef49429404089bd4bcb1b,9c5a24981b16b49429404089bd4bcb90&sysparm_stack=no&sysparm_group_change_not_allowed=true&sysparm_show_gaps=true&sysparm_show_conflicts=true&sysparm_timezone=US%2FEastern&sysparm_start_date={}&sysparm_rosters=".format(
+            nextweek_date))
+
+    eveps, evess = oncall_info()
+
+    driver.quit()
+    # print("Incident file downloaded from the servicenow.")
+    read_excel()
+
+
+def message_inc(inc_number, inc_desc, open_time, inc_team):
+    if inc_desc.find(" - FDR - ") != -1:
+        mfdrd, mjobd = inc_desc.split(" - FDR - ")
+        mjname, mcode, *e = mjobd.split(" ")
+
+        msg_list.append(
+            "<tr bgcolor='Snow'> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> "
+            "</tr>".format(inc_team[-5:], mjobd[0], inc_number, open_time, mjname, mcode, inc_desc))
+
+
+def defect_inc(inc_number, inc_desc, open_time, r_note, inc_team, assignee):
+    if inc_desc.find(" - FDR - ") != -1 or inc_desc.find("FDR(FORA) -") != -1:
+        if inc_desc.find(" - FDR - ") != -1:
+            fdrd, jobd = inc_desc.split(" - FDR - ")
+            jname, acode, *e = jobd.split(" ")
+        elif inc_desc.find("FDR(FORA) -") != -1:
+            iq1, ig2, jname, *mjobd = inc_desc.split(" ")
+            acode, iq3 = inc_desc[inc_desc.find('Error Code:'):].split(",")
+            jobd = jname
+        else:
+            jname = "NA"
+            acode = "NA"
+            jobd = "NA"
+
+
+        if inc_team[-5:] == 'TM070':
+            # inc_list.append("<tr bgcolor='Snow'> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> "
+            #                "<td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> </tr>".format(inc_team[-5:],
+            #                                                                jobd[0], inc_number, open_time, jname,
+            #                                                                acode, inc_desc, r_note, "NA", "NA"))
+            inc_list.append("<tr bgcolor='Snow'> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> "
+                            "<td>{}</td> <td>{}</td> <td>{}</td> </tr>".format(inc_team[-5:],
+                                                                               jobd[0], inc_number, assignee, open_time, jname,
+                                                                               acode, inc_desc, r_note))
+        elif inc_team[-5:] == 'TM080':
+            inc_list.append("<tr bgcolor='Snow'> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> "
+                            "<td>{}</td> <td>{}</td> <td>{}</td> </tr>".format(inc_team[-5:],
+                                                                               jobd[0], inc_number, assignee, open_time, jname,
+                                                                               acode, inc_desc, r_note))
+        elif inc_team[-5:] == 'TM029':
+            inc_list.append("<tr bgcolor='Snow'> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> "
+                            "<td>{}</td> <td>{}</td> <td>{}</td> </tr>".format(inc_team[-5:],
+                                                                               jobd[0], inc_number, assignee, open_time, jname,
+                                                                               acode, inc_desc, r_note))
+        elif inc_team[-5:] == 'TM02R':
+            inc_list.append("<tr bgcolor='Snow'> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> <td>{}</td> "
+                            "<td>{}</td> <td>{}</td> <td>{}</td> </tr>".format(inc_team[-5:],
+                                                                               jobd[0], inc_number, assignee, open_time, jname,
+                                                                               acode, inc_desc, r_note))
+        else:
+            pass
+
+
+def extract_info(opend_by, open_time, inc_number, inc_desc, inc_note, inc_team, inc_assign, today, date_select):
+    global mes_inc, cli_inc, def_inc, inc_count
+    r_note = ''
+    ocu.clear()
+
+    t_date, t_time = str(open_time).split(' ')
+
+    # Filter the INC based on dates
+    if (t_date == str(today) and t_time <= tt_check) or (t_date == str(date_select) and t_time >= yt_check)\
+            or (t_date == str(yesterday) and t_time >= yt_check):
+        inc_count += 1
+
+        if opend_by == 'CCAUT Service' and (
+                inc_desc.find(" - FDR - ") != -1 or inc_desc.find("FDR(FORA) -") != -1) and inc_desc.find(
+                "MESSAGES") == -1:
+
+            def_inc += 1
+            wn_list = []
+            if pd.isnull(inc_note):
+                r_note = "NA"
+            else:
+                oncall_found = False
+                work_note = False
+                wn_list.append(inc_note.split("\n"))
+                # Getting on-call updates from the sheet
+                for line in wn_list:
+                    for a in line:
+                        if oncall_found == False and work_note == False:
+                            pat = re.compile('|'.join(oncall_update_list), re.IGNORECASE)
+                            if pat.match(a.lower()):
+                                oncall_found = True
+                        if oncall_found:
+                            if "(work notes)" in a.lower():
+                                oncall_found = False
+                                work_note = True
+                            else:
+                                a = re.sub('|'.join(oncall_update_list), "", a, flags=re.IGNORECASE)
+                                ocu.append(a)
+                # print(len(ocu))
+                if len(ocu) > 1:
+                    for i in ocu:
+                        if i == '':
+                            pass
+                        elif i == " ":
+                            pass
+                        else:
+                            r_note = r_note + i + "<br>"
+                else:
+                    r_note = "NA"
+
+            # print(r_note)
+            if pd.isnull(inc_assign):
+                assignee = "Yet to assigned"
+            else:
+                assignee = inc_assign
+
+            print(assignee)
+
+            # Format the INC with details
+            defect_inc(inc_number, inc_desc, str(open_time), r_note, inc_team, assignee)
+        elif inc_desc.find("MESSAGES") != -1:
+            mes_inc += 1
+            message_inc(inc_number, inc_desc, str(open_time), inc_team)
+            # print("mess:", inc_number, inc_desc)
+        else:
+            cli_inc += 1
+            # print("client INC:", inc_number, inc_desc)
+
+
+def read_excel():
+
+    df = pd.read_excel(inc_excel_path)
+    # print(df)
+    # Finding Monday date
+    if datetime.today().isoweekday() == 1:
+        date_select = prev_day
+        time_disp = "48"
+    else:
+        date_select = yesterday
+        time_disp = "24"
+
+
+    # Read INC details form the excel sheet - calling extract_info method
+    for i in range(len(df)):
+        extract_info(df.loc[i, "Opened by"], df.loc[i, "Opened"], df.loc[i, "Number"], df.loc[i, "Short Description"],
+                     df.loc[i, "Work notes"], df.loc[i, "Assignment group"], df.loc[i, "Assigned to"], today, date_select)
+
+    oncall_dt = "Hi All,<br><br>Please find the cycle summary for the past {} hours.<BR><BR>" \
+                "<table border= '1' bordercolor='black' cellspacing='0' cellpadding='10'> <tr><th colspan='3'>On call information DP</th></tr>" \
+                "<tr bgcolor='LavenderBlush' paddingbottom = '20'> <th> </th> <th>Primary(India)</th> <th>Secondary(India)</th>" \
+                "<tr bgcolor='MintCream' paddingbottom = '20'> <th> Current week </th><th>{}</th> <th>{}</th></tr>" \
+                "<tr bgcolor='MintCream' paddingbottom = '20'> <th> Next week </th><th>{}</th> <th>{}</th> </tr><tr><th colspan='3'></th></tr> <tr><th colspan='3'>Incident Counts</th></tr>" \
+                "<tr bgcolor='Beige' paddingbottom = '20'> <th>Automate Incidents</th> <th>Job Abend Incidents</th> <th>Total Incidents</th></tr>" \
+                "<tr><center><td>{}</td> <td>{}</td> <td>{}</td></center></tr> </table> <br> <br>".format(time_disp, mrgps, mrgss,
+                                                                                                          eveps, evess,
+                                                                                                          mes_inc,
+                                                                                                          def_inc, (
+                                                                                                                      mes_inc + def_inc))
+
+    if len(inc_list) >= 1:
+        inc_list.sort()
+        tbf = "<table border= '1' bordercolor='black' cellspacing='0' cellpadding='10'> <tr><th colspan='9'>Job Abend Incidents</th></tr> " \
+              "<tr bgcolor='thistle' paddingbottom = '20'> <th>Team</th> <th>Cycle</th><th>IR Number</th> <th>Assigned To</th> " \
+              " <th>Time</th> <th>Job Name</th> <th>Abend Code</th> <th>Issue Description</th> " \
+              "<th>On-call Update</th> </tr>" + ' '.join(inc_list) + "</table> <br>"
+        # Root Cause
+        # "<th>On-call Update</th> <th>Temporary Resolution</th> <th>Permanent Resolution</th></tr>" + ' '.join(inc_list) + "</table> <br>"
+    else:
+        tbf = "<table border= '1' bordercolor='black' cellspacing='0' cellpadding='10'> <tr>" \
+              "<th colspan='10' bgcolor='Snow'>No Job Abend Incidents or calls received.</th></tr> </table> <br>"
+
+    if len(msg_list) >= 1:
+        msg_list.sort()
+        msg_inc = "<table border= '1' bordercolor='black' cellspacing='0' cellpadding='10'> <tr><th colspan='7'>Automate Incidents</th></tr>" \
+                  "<tr bgcolor='thistle' paddingbottom = '20'> <th>Team</th> <th>Cycle</th><th>IR Number</th> <th>Time</th> <th>Job Name</th>" \
+                  " <th>Abend Code</th> <th>Issue Description</th> </tr>" + ' '.join(msg_list) + "</table>"
+    else:
+        msg_inc = "<table border= '1' bordercolor='black' cellspacing='0' cellpadding='10'> <tr>" \
+                  "<th colspan='10' bgcolor='Snow'>No Automate Incidents received.</th></tr> </table> "
+
+    out = oncall_dt + tbf + "<br>" + msg_inc + "<BR>" + end_note
+
+    send_email = email_address
+
+    send_subject = 'Decision Platform & PCF - Cycle Summary for {}'.format(today)
+
+    mail.To = send_email
+    mail.Subject = send_subject
+    mail.HTMLBody = out
+
+    mail.Send()
+
+    print("Completed")
+
+
+# auto_download()
+# read_excel()
+try:
+    auto_download()
+    # read_excel()
+    time.sleep(3)
+    py.alert("Summary email sent. \n  Have a great day!")
+except Exception as e:
+    print(e)
+    py.alert("Facing Error, rerun or contact the team.")
+
+    emsg = "Sender  E-mail  : {}<br>Recipient E-mail: {}<br> System Error: {}".format(str(curr_emailid),
+                                                                                      str(email_address), str(e))
+    mail.To = 'rajapandian.petchimuthu@ofc.com'
+    mail.Subject = 'Cycle summary email error {}'.format(datetime.today())
+    mail.HTMLBody = emsg
+    mail.Send()
+
+    quit()
+
